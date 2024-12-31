@@ -11,7 +11,7 @@ class MultiHeadAttention(nn.Module):
     attention vectors for the sequence. Splits the query key values into
     subsets based on the number of heads.
     """
-    def __init__(self, n_heads=2, embedding_dim=10, device='cuda'):
+    def __init__(self, n_heads=5, embedding_dim=10, device='cuda'):
         """
         Initialises the nn layers needed for computing the
         self attention values.
@@ -27,12 +27,12 @@ class MultiHeadAttention(nn.Module):
         # Computing length of the input for an MHSA head
         self.d_q = self.d_k = self.d_v = self.d_model//self.n_heads
 
-        self.q_proj = nn.Linear(embedding_dim, embedding_dim).to(device)
-        self.k_proj = nn.Linear(embedding_dim, embedding_dim).to(device)
-        self.v_proj = nn.Linear(embedding_dim, embedding_dim).to(device)
+        self.q_proj = nn.Linear(self.d_model, self.d_model).to(device)
+        self.k_proj = nn.Linear(self.d_model, self.d_model).to(device)
+        self.v_proj = nn.Linear(self.d_model, self.d_model).to(device)
 
         self.softmax = nn.Softmax(dim=-1)
-        self.linear_out = nn.Linear(embedding_dim, embedding_dim).to(device)
+        self.linear_out = nn.Linear(self.d_model, self.d_model).to(device)
 
     def forward(self, Q, K, V, mask=None):
         """
@@ -50,29 +50,35 @@ class MultiHeadAttention(nn.Module):
         
         # Linearly projecting the Query, Key and Value
         self.query = self.q_proj(Q)
-        self.key = self.q_proj(K)
-        self.value = self.q_proj(V)
+        self.key = self.k_proj(K)
+        self.value = self.v_proj(V)
         self.mask = mask
+
+        self.batch_size = self.query.shape[0]
+        self.query_len = self.query.shape[1]
+        self.key_len = self.key.shape[1]
+        self.value_len = self.value.shape[1]
 
         # assert(self.query.shape[-1] == self.d_model), f"Query token should be of the length {self.d_model}"
         # assert(self.key.shape[-1] == self.d_model), f"Key token should be of the length {self.d_model}"
         # assert(self.value.shape[-1] == self.d_model), f"Value token should be of the length {self.d_model}"
 
-        self.query = self.query.reshape(self.query.shape[0], self.query.shape[1], self.n_heads, self.query.shape[-1]//self.n_heads)
-        self.key = self.key.reshape(self.key.shape[0], self.key.shape[1], self.n_heads, self.key.shape[-1]//self.n_heads)
-        self.value = self.value.reshape(self.value.shape[0], self.value.shape[1], self.n_heads, self.value.shape[-1]//self.n_heads)
+        self.query = self.query.reshape(self.batch_size, self.query_len, self.n_heads, self.d_q) #B, N, H, d_q
+        self.key = self.key.reshape(self.batch_size, self.key_len, self.n_heads, self.d_k) #B, N, H, d_k
+        self.value = self.value.reshape(self.batch_size, self.value_len, self.n_heads, self.d_v) #B, N, H, d_v
 
         # self.dot_prod = torch.einsum("bqhd,bkhd->bhqk",self.query, self.key)
         self.dot_prod = torch.matmul(torch.permute(self.query, (0,2,1,3)), torch.permute(self.key, (0,2,3,1)))
+
         if not self.mask == None:
             mask = mask.bool()
-            self.dot_prod.masked_fill(mask, value=-1*torch.inf)
+            self. dot_prod = self.dot_prod.masked_fill(mask, value=-1*torch.inf)
+
         self.dot_prod = self.softmax(self.dot_prod)
 
-        self.attention = torch.matmul(self.dot_prod, torch.permute(self.value, (0,2,1,3)))      
-        self.attention = torch.permute(self.attention, (0,2,1,3)).reshape(self.query.shape[0],self.query.shape[1], self.d_model)
-        # self.attention = torch.einsum("bhqv,bvhd->bqhd", self.dot_prod, self.value).reshape(self.value.shape[0],self.value.shape[1], self.d_model)
-
+        # self.attention = torch.einsum("bhqv,bvhd->bqhd", self.dot_prod, self.value).reshape(self.batch_size,self.query_len, self.d_model)
+        self.attention = torch.matmul(self.dot_prod, torch.permute(self.value, (0,2,1,3))) 
+        self.attention = torch.permute(self.attention, (0,2,1,3)).reshape(self.batch_size,self.query_len, self.d_model)
         self.out = self.linear_out(self.attention)
 
         return self.out
@@ -100,10 +106,10 @@ class EncoderBlock(nn.Module):
         self.ff_multiplier = ff_multiplier
         self.dropout = dropout
 
-        self.mhsa = MultiHeadAttention(n_heads=self.n_heads, embedding_dim= self.embedding_dim, device=device)
-        self.norm1 = nn.LayerNorm(self.embedding_dim).to(device=device)
-        self.norm2 = nn.LayerNorm(self.embedding_dim).to(device=device)
-        self.dropout = nn.Dropout(p=self.dropout)
+        self.mhsa = MultiHeadAttention(n_heads=n_heads, embedding_dim= embedding_dim, device=device)
+        self.norm1 = nn.LayerNorm(embedding_dim).to(device=device)
+        self.norm2 = nn.LayerNorm(embedding_dim).to(device=device)
+        self.dropout = nn.Dropout(p=dropout)
 
         self.feed_forward = nn.Sequential(nn.Linear(embedding_dim, ff_multiplier*embedding_dim), nn.ReLU(), nn.Linear(ff_multiplier*embedding_dim, embedding_dim)).to(device=device)
 
@@ -209,11 +215,11 @@ class EncoderStack(nn.Module):
         self.device = device
         self.dropout = dropout
 
-        self.encoder_input_embedding = InputEmbedding(vocab_len=self.src_vocab_len, embedding_dim=10)
-        self.encoder_position_embeddings = PositionalEncoding(max_seq_len=self.max_src_seq_len,
-                                                               embedding_dim=10)
-        self.layer_list = nn.ModuleList(EncoderBlock(self.n_heads, self.embedding_dim, self.ff_multiplier,dropout,
-                                                       self.device) for i in range(self.n_encoders))
+        self.encoder_input_embedding = InputEmbedding(vocab_len=src_vocab_len, embedding_dim=embedding_dim)
+        self.encoder_position_embeddings = PositionalEncoding(max_seq_len=max_src_seq_len,
+                                                               embedding_dim=embedding_dim)
+        self.layer_list = nn.ModuleList(EncoderBlock(n_heads, embedding_dim, ff_multiplier,dropout,
+                                                       device) for i in range(self.n_encoders))
         
     def forward(self, encoder_input_batch, src_mask = None):
         """
@@ -227,7 +233,7 @@ class EncoderStack(nn.Module):
 
         """
         self.encoder_embedded_batch = self.encoder_input_embedding(encoder_input_batch)
-        self.encoder_input = self.encoder_embedded_batch + self.encoder_position_embeddings
+        self.encoder_input = self.encoder_embedded_batch + self.encoder_position_embeddings[:self.encoder_embedded_batch.shape[1]]
 
         for encoder_block in self.layer_list:
             self.encoder_input = encoder_block(self.encoder_input, mask= src_mask)
@@ -266,10 +272,11 @@ class DecoderStack(nn.Module):
         self.device = device
         self.dropout = dropout
 
-        self.decoder_input_embedding = InputEmbedding(vocab_len=self.targ_vocab_len, embedding_dim=10)
-        self.decoder_position_embeddings = PositionalEncoding(max_seq_len=self.max_targ_seq_len, embedding_dim=10)
-        self.layer_list = nn.ModuleList(DecoderBlock(self.n_heads, self.embedding_dim, self.ff_multiplier,self.dropout,
-                                                      self.device) for i in range(self.n_decoders))
+        self.decoder_input_embedding = InputEmbedding(vocab_len=targ_vocab_len, embedding_dim=embedding_dim)
+        self.decoder_position_embeddings = PositionalEncoding(max_seq_len=max_targ_seq_len,
+                                                              embedding_dim=embedding_dim)
+        self.layer_list = nn.ModuleList(DecoderBlock(n_heads, embedding_dim, ff_multiplier,dropout,
+                                                      device) for i in range(n_decoders))
         
     def forward(self, decoder_input_batch, encoder_output, src_mask = None, target_mask=None):
         """
@@ -283,7 +290,7 @@ class DecoderStack(nn.Module):
 
         """
         self.decoder_embedded_batch = self.decoder_input_embedding(decoder_input_batch)
-        self.decoder_input = self.decoder_embedded_batch + self.decoder_position_embeddings
+        self.decoder_input = self.decoder_embedded_batch + self.decoder_position_embeddings[:self.decoder_embedded_batch.shape[1]]
         self.encoder_output = encoder_output
 
         for decoder_block in self.layer_list:
@@ -340,7 +347,7 @@ class Transformer(nn.Module):
             predicted_label (tensor): Prediction vector of shape (batch_size, sequence_length, target_vocab_len)
         """
         encoder_output = self.encoder_stack(encoder_input_batch, src_mask)
-        decoder_output = self.decoder_stack(decoder_input_batch, encoder_output, target_mask = targ_mask)
+        decoder_output = self.decoder_stack(decoder_input_batch, encoder_output, src_mask=None, target_mask = targ_mask)
         predicted_label = self.softmax(self.prediction_layer(decoder_output))
 
         return predicted_label
@@ -349,23 +356,23 @@ class Transformer(nn.Module):
 
 
 if __name__ == "__main__":
-    # encoder_input_embedding = InputEmbedding(vocab_len=10, embedding_dim=10)
+    # encoder_input_embedding = InputEmbedding(vocab_len=10, embedding_dim=20)
     encoder_input_batch = torch.tensor([[6, 1, 2, 3, 4],[5, 6,7,8,9], [9, 8,7,6,5], [4, 3, 2, 1, 0]]).to('cuda')
     # encoder_embedded_batch = encoder_input_embedding(encoder_input_batch)
-    # encoder_position_embeddings = PositionalEncoding(max_seq_len=5, embedding_dim=10)
+    # encoder_position_embeddings = PositionalEncoding(max_seq_len=5, embedding_dim=20)
     
     # decoder_input_embedding = InputEmbedding(vocab_len=10, embedding_dim=10)
-    decoder_input_batch = torch.tensor([[0, 1, 1, 2, 6],[7, 2, 9, 3, 6], [3, 1, 7, 9, 4], [4, 2, 6, 5, 8]]).to('cuda')
+    decoder_input_batch = torch.tensor([[0, 1, 1, 2, 6, 7],[7, 2, 9, 3, 6, 5], [3, 1, 7, 9, 4, 1], [4, 2, 6, 5, 8, 2]]).to('cuda')
     # decoder_embedded_batch = decoder_input_embedding(decoder_input_batch)
-    # decoder_position_embeddings = PositionalEncoding(max_seq_len=5, embedding_dim=10)
+    # decoder_position_embeddings = PositionalEncoding(max_seq_len=6, embedding_dim=10)
     
     # encoder_input = encoder_embedded_batch + encoder_position_embeddings
     
     # decoder_input = decoder_embedded_batch + decoder_position_embeddings
-    mask = torch.triu(torch.ones(5,5),diagonal=1).bool().to('cuda')
+    mask = torch.triu(torch.ones(6,6),diagonal=1).bool().to('cuda')
 
-    # mhsa = MultiHeadAttention(n_heads=5, embedding_dim=10)
-    # output = mhsa(encoder_input, encoder_input, encoder_input, mask)
+    # mhsa = MultiHeadAttention(n_heads=5, embedding_dim=20)
+    # output = mhsa(encoder_input, encoder_input, encoder_input, mask=mask)
     # print(encoder_input.shape, output.shape)
 
     # encoder = EncoderBlock()
@@ -376,13 +383,15 @@ if __name__ == "__main__":
     # decoder_output = decoder(decoder_input, encoder_output, target_mask=mask)
     # print(decoder_input.shape, decoder_output.shape)
 
-    encoder_stack = EncoderStack(n_encoders=6, n_heads=5, embedding_dim=10, ff_multiplier=4, device='cuda')
-    decoder_stack = DecoderStack(n_decoders=6, n_heads=5, embedding_dim=10, ff_multiplier=4, device='cuda')
+    # encoder_stack = EncoderStack(n_encoders=6, n_heads=5, embedding_dim=10, ff_multiplier=4, device='cuda')
+    # decoder_stack = DecoderStack(n_decoders=6, n_heads=5, embedding_dim=10, ff_multiplier=4, device='cuda')
 
-    encoder_output = encoder_stack(encoder_input_batch)
-    decoder_output = decoder_stack(decoder_input_batch, encoder_output, target_mask = mask)
+    # encoder_output = encoder_stack(encoder_input_batch)
+    # decoder_output = decoder_stack(decoder_input_batch, encoder_output, target_mask = mask)
 
-    transformer = Transformer()
+    transformer = Transformer(src_vocab_len=10, targ_vocab_len=10, max_seq_len=100,
+                              dropout=0.1, n_encoders=6, n_decoders=6, n_heads=5,
+                              embedding_dim=20, ff_multiplier=4, device='cuda')
     output = transformer(encoder_input_batch, decoder_input_batch, targ_mask = mask)
 
     print(output,output.shape)
