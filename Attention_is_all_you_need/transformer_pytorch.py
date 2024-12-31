@@ -230,12 +230,16 @@ class EncoderStack(nn.Module):
                                             token classes of shape (batch_size, sequence_length)
             src_mask (tensor): A mask which is applied in the Multi-Head attention block of
                                 shape (seq_length, seq_length)
+        Returns:
+            encoder_output (tensor): The output of the transformer encoder stack of shape 
+                                    (batch_size, seq_length, embedding_dim)
 
         """
         self.encoder_embedded_batch = self.encoder_input_embedding(encoder_input_batch)
         self.encoder_input = self.encoder_embedded_batch + self.encoder_position_embeddings[:self.encoder_embedded_batch.shape[1]]
 
-        for encoder_block in self.layer_list:
+        for i,encoder_block in enumerate(self.layer_list):
+            print(f"In encoder number {i} {encoder_block}:",self.encoder_input)
             self.encoder_input = encoder_block(self.encoder_input, mask= src_mask)
         self.encoder_output = self.encoder_input
 
@@ -285,15 +289,22 @@ class DecoderStack(nn.Module):
         Arguments:
             decoder_input_batch (tensor): Tensor containing the target input sequences with
                                             token classes of shape (batch_size, sequence_length)
-            src_mask (tensor): A mask which is applied in the Multi-Head attention block of
-                                shape (seq_length, seq_length)
-
+            encoder_output (tensor): The output of the transformer encoder blocks of shape 
+                                    (batch_size, seq_length, embedding_dim)
+            src_mask (tensor): A mask which is applied in the 2nd Multi-Head attention block in
+                                a decoder of shape (seq_length, seq_length)
+            target_mask (tensor): A mask which is applied in the 1st Multi-Head attention block in
+                                a decoder of shape (seq_length, seq_length)
+        Returns:
+            decoder_output (tensor): The output of the transformer decoder stack of shape 
+                                    (batch_size, seq_length, embedding_dim)
         """
         self.decoder_embedded_batch = self.decoder_input_embedding(decoder_input_batch)
         self.decoder_input = self.decoder_embedded_batch + self.decoder_position_embeddings[:self.decoder_embedded_batch.shape[1]]
         self.encoder_output = encoder_output
 
-        for decoder_block in self.layer_list:
+        for i,decoder_block in enumerate(self.layer_list):
+            print(f"In decoder number {i} {decoder_block}", self.decoder_input)
             self.decoder_input = decoder_block(self.decoder_input, self.encoder_output,
                                                src_mask= src_mask, target_mask=target_mask)
         self.decoder_output = self.decoder_input
@@ -334,7 +345,7 @@ class Transformer(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
 
         
-    def forward(self, encoder_input_batch, decoder_input_batch, src_mask=None, targ_mask=None):
+    def forward(self, encoder_input_batch, decoder_input_batch, src_mask=None, target_mask=None):
         """
         Performs the entire feed forward for the transformer.
 
@@ -347,7 +358,7 @@ class Transformer(nn.Module):
             predicted_label (tensor): Prediction vector of shape (batch_size, sequence_length, target_vocab_len)
         """
         encoder_output = self.encoder_stack(encoder_input_batch, src_mask)
-        decoder_output = self.decoder_stack(decoder_input_batch, encoder_output, src_mask=None, target_mask = targ_mask)
+        decoder_output = self.decoder_stack(decoder_input_batch, encoder_output, src_mask=None, target_mask = target_mask)
         predicted_label = self.softmax(self.prediction_layer(decoder_output))
 
         return predicted_label
@@ -392,7 +403,7 @@ if __name__ == "__main__":
     transformer = Transformer(src_vocab_len=10, targ_vocab_len=10, max_seq_len=100,
                               dropout=0.1, n_encoders=6, n_decoders=6, n_heads=5,
                               embedding_dim=20, ff_multiplier=4, device='cuda')
-    output = transformer(encoder_input_batch, decoder_input_batch, targ_mask = mask)
+    output = transformer(encoder_input_batch, decoder_input_batch, target_mask = mask)
 
     print(output,output.shape)
 
