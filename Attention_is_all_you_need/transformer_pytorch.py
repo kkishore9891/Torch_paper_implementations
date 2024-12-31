@@ -239,7 +239,6 @@ class EncoderStack(nn.Module):
         self.encoder_input = self.encoder_embedded_batch + self.encoder_position_embeddings[:self.encoder_embedded_batch.shape[1]]
 
         for i,encoder_block in enumerate(self.layer_list):
-            print(f"In encoder number {i} {encoder_block}:",self.encoder_input)
             self.encoder_input = encoder_block(self.encoder_input, mask= src_mask)
         self.encoder_output = self.encoder_input
 
@@ -304,7 +303,6 @@ class DecoderStack(nn.Module):
         self.encoder_output = encoder_output
 
         for i,decoder_block in enumerate(self.layer_list):
-            print(f"In decoder number {i} {decoder_block}", self.decoder_input)
             self.decoder_input = decoder_block(self.decoder_input, self.encoder_output,
                                                src_mask= src_mask, target_mask=target_mask)
         self.decoder_output = self.decoder_input
