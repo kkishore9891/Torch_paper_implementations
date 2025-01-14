@@ -2,10 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils import PatchPositionEmbedding
-from torch.utils.data import Dataset
-from torchvision import datasets
-from torchvision.transforms import ToTensor
-from torchinfo import summary
 
 class MultiHeadAttention(nn.Module):
     """
@@ -81,7 +77,7 @@ class MultiHeadAttention(nn.Module):
             mask = mask.bool()
             self. dot_prod = self.dot_prod.masked_fill(mask, value=-1*torch.inf)
 
-        self.dot_prod = self.softmax(self.dot_prod)
+        self.dot_prod = self.softmax(self.dot_prod/(self.d_model**(1/2)))
 
         # self.attention = torch.einsum("bhqv,bvhd->bqhd", self.dot_prod, self.value).reshape(self.batch_size,self.query_len, self.d_model)
         self.attention = torch.matmul(self.dot_prod, torch.permute(self.value, (0,2,1,3))) 
@@ -231,7 +227,7 @@ class VisionTransformer(nn.Module):
                                           n_heads=n_heads, embedding_dim=embedding_dim,
                                           ff_multiplier=ff_multiplier, dropout=dropout, device='cuda')
         
-        self.prediction_layer = nn.Linear(embedding_dim, n_classes).to(device=device)
+        self.prediction_layer = nn.Sequential(nn.Linear(embedding_dim, n_classes), nn.LogSoftmax(dim=1)).to(device=device)
 
         
     def forward(self, images):
@@ -249,91 +245,3 @@ class VisionTransformer(nn.Module):
         predicted_label = self.prediction_layer(encoder_output[:,0])
 
         return predicted_label
-
-def train_loop(dataloader, model, loss_fn, optimizer):
-    size = len(dataloader.dataset)
-    # Set the model to training mode - important for batch normalization and dropout layers
-    # Unnecessary in this situation but added for best practices
-    model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        # Compute prediction and loss
-        X, y = X.to('cuda'), y.to('cuda')
-        pred = model(X)
-        loss = loss_fn(pred, y)
-
-        # Backpropagation
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-        if batch % 100 == 0:
-            loss, current = loss.item(), batch * batch_size + len(X)
-            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-
-
-def test_loop(dataloader, model, loss_fn):
-    # Set the model to evaluation mode - important for batch normalization and dropout layers
-    # Unnecessary in this situation but added for best practices
-    model.eval()
-    size = len(dataloader.dataset)
-    num_batches = len(dataloader)
-    test_loss, correct = 0, 0
-
-    # Evaluating the model with torch.no_grad() ensures that no gradients are computed during test mode
-    # also serves to reduce unnecessary gradient computations and memory usage for tensors with requires_grad=True
-    with torch.no_grad():
-        for X, y in dataloader:
-            X, y = X.to('cuda'), y.to('cuda')
-            pred = model(X)
-            test_loss += loss_fn(pred, y).item()
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-
-    test_loss /= num_batches
-    correct /= size
-    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
-
-
-if __name__ == "__main__":
-    
-    training_data = datasets.MNIST(
-    root="data",
-    train=True,
-    download=True,
-    transform=ToTensor()
-    )
-
-    test_data = datasets.MNIST(
-        root="data",
-        train=False,
-        download=True,
-        transform=ToTensor()
-    )
-
-    model = VisionTransformer(image_h=28, image_w=28, image_c=1, patch_d=4,
-                              dropout=0.1, n_encoders=6, n_heads=4,
-                              embedding_dim=64, ff_multiplier=2, n_classes=10,
-                               device='cuda').to(device='cuda')
-
-    summary(model)
-
-    learning_rate = 3e-3
-    batch_size = 64
-    epochs = 10
-
-    trainloader = torch.utils.data.DataLoader(training_data, batch_size=batch_size,
-                                          shuffle=True)
-    testloader = torch.utils.data.DataLoader(test_data, batch_size=batch_size,
-                                          shuffle=True)
-    
-    # Initialize the loss function
-    loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    
-    dataiter = iter(trainloader)
-
-    for t in range(epochs):
-        print(f"Epoch {t+1}\n-------------------------------")
-        train_loop(trainloader, model, loss_fn, optimizer)
-        test_loop(testloader, model, loss_fn)
-    print("Done!")
-
