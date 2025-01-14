@@ -6,13 +6,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math as m
+from tqdm import tqdm
+
 
 class PatchPositionEmbedding(nn.Module):
     """
     This is an nn module that takes input token class numbers and converts them
     to an embedding vector.
     """
-    def __init__(self, image_h = 28, image_w = 28, image_c =1, patch_d=4, embedding_dim = 8, dropout = 0.1, device = 'cuda'):
+    def __init__(self, image_h = 28, image_w = 28, image_c =3, patch_d=4, embedding_dim = 8, dropout = 0.1, device = 'cuda'):
         """
         Init function that initialises the embedding layer.
 
@@ -32,18 +34,17 @@ class PatchPositionEmbedding(nn.Module):
         self.patch_d = patch_d
         self.embedding_dim = embedding_dim
         self.device = device
-
+        
         self.class_token = nn.parameter.Parameter(torch.randn(embedding_dim)).to(device=device)
         
-
         assert(image_h%patch_d==0), f"Image height {image_h} is not divisible by patch size {patch_d}"
         assert(image_w%patch_d==0), f"Image width {image_w} is not divisible by patch size {patch_d}"
 
         self.N_patches = (image_h*image_w)//patch_d**2
-        self.embedding_layer = nn.Linear(self.patch_d**2*image_c, self.embedding_dim).to(device=device)
+        self.max_seq_len = self.N_patches+1
+        self.patch_embedding_layer = nn.Linear(self.patch_d**2*image_c, self.embedding_dim).to(device=device)
+        self.position_embedding = nn.Embedding(self.max_seq_len, embedding_dim).to(device=device)
 
-        self.position_encodings = PositionalEncoding(max_seq_len=self.N_patches+1,
-                                                     embedding_dim=self.embedding_dim, device=self.device)
         self.dropout = nn.Dropout(dropout)
         
 
@@ -61,40 +62,69 @@ class PatchPositionEmbedding(nn.Module):
         """
         assert(x.dim() == 4), "Input batch should have a shape of (B, image_c, image_h, image_w)"
         self.batch_size = x.shape[0]
+        self.positions = torch.arange(0, self.max_seq_len).expand(self.batch_size, self.max_seq_len).to(self.device)
+        self.position_encodings = self.position_embedding(self.positions)
 
         self.patches = torch.zeros((self.batch_size, self.N_patches, self.patch_d**2*self.image_c)).to(device=self.device)
         for i in range(self.image_h//self.patch_d):
             for j in range(self.image_w//self.patch_d):
                 self.patches[:,i*(self.image_w//self.patch_d)+j] = x[:,:,i*self.patch_d:(i+1)*self.patch_d,j*self.patch_d:(j+1)*self.patch_d].reshape(self.batch_size, self.patch_d**2*self.image_c)
 
-        self.patches = self.dropout(self.embedding_layer(self.patches))
-        patch_embedding = torch.hstack([self.class_token.expand(self.batch_size,1,self.embedding_dim),self.patches])
+        self.vector_patches = self.dropout(self.patch_embedding_layer(self.patches))
+        patch_embedding = torch.hstack([self.class_token.expand(self.batch_size,1,self.embedding_dim), self.vector_patches])
         patch_pos_embedding = patch_embedding + self.position_encodings
         patch_pos_embedding = self.dropout(patch_pos_embedding)
 
         return patch_pos_embedding
 
-def PositionalEncoding(max_seq_len = 50, embedding_dim = 8, device = 'cuda'):
-    """
-    Creates the position encoder embeddings which will be added to the input
-    sequences embeddings to keep track of positions of the sequence tokens.
 
-    Arguments:
-        max_seq_len (int): Maximum value of the sequence length in the dataset.
-        embedding_dim (int): The length of the embedding vector for a sequence token.
-        device (str): The device to which weights are loaded. Defaults to cuda.
-    Returns:
-        pos_embeddings (tensor): Position embeddings vector of dimension (max_seq_len, embedding_dim)
-    """
-    
-    pos_embeddings = torch.zeros((max_seq_len, embedding_dim))
-    for pos in range(max_seq_len):
-        for i in range(embedding_dim//2):
-            pos_embeddings[pos, 2*i] = m.sin(pos/(5**(2*i/embedding_dim)))
-            pos_embeddings[pos, 2*i+1] = m.cos(pos/(5**(2*i/embedding_dim)))
-    
-    return pos_embeddings.to(device=device)
+def train_loop(epoch, dataloader, batch_size, model, loss_fn, optimizer, device='cuda'):
+    with tqdm(dataloader, unit="batch") as tepoch:
+     for data, target in tepoch:
+         tepoch.set_description(f"Epoch {epoch}")
 
+         data, target = data.to(device), target.to(device)
+         optimizer.zero_grad()
+         output = model(data)
+         predictions = output.argmax(dim=1, keepdim=True).squeeze()
+         loss = loss_fn(output, target)
+         correct = (predictions == target).type(torch.float).sum().item()
+         accuracy = correct / batch_size
+
+         loss.backward()
+         optimizer.step()
+         
+         tepoch.set_postfix(loss=loss.item(), accuracy=100. * accuracy)
+
+def test_loop(epoch, dataloader, model, loss_fn, device='cuda'):
+    # Set the model to evaluation mode - important for batch normalization and dropout layers
+    # Unnecessary in this situation but added for best practices
+    model.eval()
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    test_loss, correct = 0, 0
+
+    # Evaluating the model with torch.no_grad() ensures that no gradients are computed during test mode
+    # also serves to reduce unnecessary gradient computations and memory usage for tensors with requires_grad=True
+    with torch.no_grad():
+         with tqdm(dataloader, unit="batch") as tepoch:
+          for data, target in tepoch:
+              tepoch.set_description(f"Epoch {epoch}")
+              data, target = data.to(device), target.to(device)
+              pred = model(data)
+              test_loss += loss_fn(pred, target).item()
+              correct += (pred.argmax(1) == target).type(torch.float).sum().item()
+
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    return 100*correct
+
+def checkpoint(model, filename):
+    torch.save(model.state_dict(), filename)
+    
+def resume(model, filename):
+    model.load_state_dict(torch.load(filename))
 
 if __name__=="__main__":
     from torch.utils.data import Dataset
