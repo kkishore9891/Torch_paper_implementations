@@ -58,5 +58,5 @@ for t in range(epochs):
     if test_accuracy > best_test_accuracy:
         print("New test accuracy achieved!!!!")
         best_test_accuracy = test_accuracy
-        checkpoint(model=model, filename=f"cat_dog_best.pth")
+        checkpoint(model=model, filename=f"models/cat_dog/cat_dog_best.pth")
 print("Done!")

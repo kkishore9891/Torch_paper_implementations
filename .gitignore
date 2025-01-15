@@ -1,5 +1,4 @@
 An_image_is_worth_16x16_words/data/*
 An_image_is_worth_16x16_words/__pycache__/*
-An_image_is_worth_16x16_words/models
 *.pth
 venv
