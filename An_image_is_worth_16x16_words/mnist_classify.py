@@ -49,5 +49,4 @@ for t in range(epochs):
     if test_accuracy > best_test_accuracy:
         best_test_accuracy = test_accuracy
         checkpoint(model=model, filename=f"models/mnist/best.pth")
-    checkpoint(model=model, filename=f"models/mnist/mnist_epoch-{t+1}.pth")
 print("Done!")
