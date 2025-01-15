@@ -36,8 +36,8 @@ model = VisionTransformer(image_h=224, image_w=224, image_c=3, patch_d=32,
 
 summary(model)
 
-learning_rate = 1e-5
-batch_size = 256
+learning_rate = 1e-4
+batch_size = 128
 epochs = 100
 
 train_dataset = ImageFolder(root="data/Cats_vs_Dogs/training_set", transform=train_transform)
@@ -47,7 +47,7 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
 # Initialize the loss function
-loss_fn = nn.CrossEntropyLoss()
+loss_fn = nn.NLLLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 best_test_accuracy = 0
