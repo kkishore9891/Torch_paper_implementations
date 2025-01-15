@@ -37,7 +37,7 @@ model = VisionTransformer(image_h=224, image_w=224, image_c=3, patch_d=32,
 summary(model)
 
 learning_rate = 1e-5
-batch_size = 2
+batch_size = 256
 epochs = 100
 
 train_dataset = ImageFolder(root="data/Cats_vs_Dogs/training_set", transform=train_transform)
@@ -56,7 +56,7 @@ for t in range(epochs):
     train_loop(t+1,train_loader, batch_size, model, loss_fn, optimizer)
     test_accuracy = test_loop(t+1, test_loader, model, loss_fn)
     if test_accuracy > best_test_accuracy:
+        print("New test accuracy achieved!!!!")
         best_test_accuracy = test_accuracy
         checkpoint(model=model, filename=f"cat_dog_best.pth")
-    checkpoint(model=model, filename=f"cat_dog_epoch-{t+1}.pth")
 print("Done!")
