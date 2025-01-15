@@ -27,12 +27,12 @@ class MultiHeadAttention(nn.Module):
         # Computing length of the input for an MHSA head
         self.d_q = self.d_k = self.d_v = self.d_model//self.n_heads
 
-        self.q_proj = nn.Linear(self.d_model, self.d_model).to(device)
-        self.k_proj = nn.Linear(self.d_model, self.d_model).to(device)
-        self.v_proj = nn.Linear(self.d_model, self.d_model).to(device)
+        self.q_proj = nn.Linear(self.d_model, self.d_model)
+        self.k_proj = nn.Linear(self.d_model, self.d_model)
+        self.v_proj = nn.Linear(self.d_model, self.d_model)
 
         self.softmax = nn.Softmax(dim=-1)
-        self.linear_out = nn.Linear(self.d_model, self.d_model).to(device)
+        self.linear_out = nn.Linear(self.d_model, self.d_model)
 
     def forward(self, Q, K, V, mask=None):
         """
@@ -77,7 +77,7 @@ class MultiHeadAttention(nn.Module):
             mask = mask.bool()
             self. dot_prod = self.dot_prod.masked_fill(mask, value=-1*torch.inf)
 
-        self.dot_prod = self.softmax(self.dot_prod/(self.d_model**(1/2)))
+        self.dot_prod = self.softmax(self.dot_prod/(self.d_k**(1/2)))
 
         # self.attention = torch.einsum("bhqv,bvhd->bqhd", self.dot_prod, self.value).reshape(self.batch_size,self.query_len, self.d_model)
         self.attention = torch.matmul(self.dot_prod, torch.permute(self.value, (0,2,1,3))) 
@@ -107,11 +107,10 @@ class EncoderBlock(nn.Module):
         self.n_heads = n_heads
         self.embedding_dim = embedding_dim
         self.ff_multiplier = ff_multiplier
-        self.dropout = dropout
 
         self.mhsa = MultiHeadAttention(n_heads=n_heads, embedding_dim= embedding_dim, device=device)
-        self.norm1 = nn.LayerNorm(embedding_dim).to(device=device)
-        self.norm2 = nn.LayerNorm(embedding_dim).to(device=device)
+        self.norm1 = nn.LayerNorm(embedding_dim)
+        self.norm2 = nn.LayerNorm(embedding_dim)
         self.dropout = nn.Dropout(p=dropout)
 
         self.feed_forward = nn.Sequential(nn.Linear(embedding_dim, ff_multiplier*embedding_dim), nn.GELU(), nn.Linear(ff_multiplier*embedding_dim, embedding_dim)).to(device=device)
@@ -130,7 +129,7 @@ class EncoderBlock(nn.Module):
         attention = self.dropout(self.mhsa(norm_input, norm_input, norm_input, mask))
         attention = attention + input
         norm_attention = self.norm2(attention)
-        ff_output = self.dropout(self.feed_forward(norm_attention))
+        ff_output = self.feed_forward(norm_attention)
         output = attention+ff_output
 
         return output
@@ -169,13 +168,14 @@ class EncoderStack(nn.Module):
         self.embedding_dim = embedding_dim
         self.ff_multiplier = ff_multiplier
         self.device = device
-        self.dropout = dropout
+        self.dropout = nn.Dropout(p=dropout)
 
         self.patch_embedding = PatchPositionEmbedding(image_h=image_h, image_w=image_w, image_c=image_c,
                                                       patch_d=patch_d, embedding_dim=embedding_dim, device='cuda')
 
         self.layer_list = nn.ModuleList(EncoderBlock(n_heads, embedding_dim, ff_multiplier,dropout,
                                                        device) for i in range(self.n_encoders))
+        self.norm = nn.LayerNorm(embedding_dim)
         
     def forward(self, images):
         """
@@ -191,13 +191,15 @@ class EncoderStack(nn.Module):
 
         """
         
-        self.encoder_input = self.patch_embedding(images)
+        encoder_input = self.dropout(self.patch_embedding(images))
 
         for i,encoder_block in enumerate(self.layer_list):
-            self.encoder_input = encoder_block(self.encoder_input)
-        self.encoder_output = self.encoder_input
+            encoder_input = encoder_block(encoder_input)
+        encoder_output = encoder_input
 
-        return self.encoder_output
+        encoder_output = self.norm(encoder_output)
+
+        return encoder_output
         
 class VisionTransformer(nn.Module):
     """
@@ -227,7 +229,7 @@ class VisionTransformer(nn.Module):
                                           n_heads=n_heads, embedding_dim=embedding_dim,
                                           ff_multiplier=ff_multiplier, dropout=dropout, device='cuda')
         
-        self.prediction_layer = nn.Sequential(nn.Linear(embedding_dim, n_classes), nn.LogSoftmax(dim=1)).to(device=device)
+        self.prediction_layer = nn.Sequential(nn.Linear(embedding_dim, n_classes), nn.LogSoftmax(dim=-1))
 
         
     def forward(self, images):
