@@ -61,74 +61,154 @@ class PatchPositionEmbedding(nn.Module):
                                             of shape (batch_size, n_patches+1, embedding_dim)
         """
         assert(x.dim() == 4), "Input batch should have a shape of (B, image_c, image_h, image_w)"
-        self.batch_size = x.shape[0]
-        self.positions = torch.arange(0, self.max_seq_len).expand(self.batch_size, self.max_seq_len).to(self.device)
-        self.position_encodings = self.position_embedding(self.positions)
+        batch_size = x.shape[0]
+        positions = torch.arange(0, self.max_seq_len).expand(batch_size, self.max_seq_len).to(self.device)
+        position_encodings = self.position_embedding(positions)
 
-        self.patches = torch.zeros((self.batch_size, self.N_patches, self.patch_d**2*self.image_c)).to(device=self.device)
+        patches = torch.zeros((batch_size, self.N_patches, self.patch_d**2*self.image_c)).to(device=self.device)
         for i in range(self.image_h//self.patch_d):
             for j in range(self.image_w//self.patch_d):
-                self.patches[:,i*(self.image_w//self.patch_d)+j] = x[:,:,i*self.patch_d:(i+1)*self.patch_d,j*self.patch_d:(j+1)*self.patch_d].reshape(self.batch_size, self.patch_d**2*self.image_c)
+                patches[:,i*(self.image_w//self.patch_d)+j] = x[:,:,i*self.patch_d:(i+1)*self.patch_d,j*self.patch_d:(j+1)*self.patch_d].reshape(batch_size, self.patch_d**2*self.image_c)
 
-        self.vector_patches = self.dropout(self.patch_embedding_layer(self.patches))
-        patch_embedding = torch.hstack([self.class_token.expand(self.batch_size,1,self.embedding_dim), self.vector_patches])
-        patch_pos_embedding = patch_embedding + self.position_encodings
+        vector_patches = self.dropout(self.patch_embedding_layer(patches))
+        patch_embedding = torch.hstack([self.class_token.expand(batch_size,1,self.embedding_dim), vector_patches])
+        patch_pos_embedding = patch_embedding + position_encodings
         patch_pos_embedding = self.dropout(patch_pos_embedding)
 
         return patch_pos_embedding
 
 
-def train_loop(epoch, dataloader, batch_size, model, loss_fn, optimizer, device='cuda'):
-    with tqdm(dataloader, unit="batch") as tepoch:
-     for data, target in tepoch:
-         tepoch.set_description(f"Epoch {epoch}")
+def train_loop(epoch, dataloader, model, loss_fn, optimizer, wandb, device='cuda'):
+    """
+    Trains the model for one epoch and logs training loss and accuracy per batch.
 
-         data, target = data.to(device), target.to(device)
-         optimizer.zero_grad()
-         output = model(data)
-         predictions = output.argmax(dim=1, keepdim=True).squeeze()
-         loss = loss_fn(output, target)
-         correct = (predictions == target).type(torch.float).sum().item()
-         accuracy = correct / len(data)
+    Args:
+        epoch (int): Current epoch number.
+        dataloader (DataLoader): DataLoader for training data.
+        model (nn.Module): The neural network model.
+        loss_fn (nn.Module): Loss function.
+        optimizer (torch.optim.Optimizer): Optimizer.
+        wandb (wandb.sdk.wandb_run.Run): WandB run for logging.
+        device (str): Device to run the training on.
+    
+    Returns:
+        float: Average training loss over the epoch.
+        float: Average training accuracy over the epoch.
+    """
+    model.train()
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    total_loss = 0.0
+    correct = 0
 
-         loss.backward()
-         optimizer.step()
-         
-         tepoch.set_postfix(loss=loss.item(), accuracy=100. * accuracy)
+    with tqdm(dataloader, desc=f"Epoch {epoch} [Train]", unit="batch") as tepoch:
+        for batch_idx, (data, target) in enumerate(tepoch, 1):
+            data, target = data.to(device), target.to(device)
+            optimizer.zero_grad()
+            outputs = model(data)
+            loss = loss_fn(outputs, target)
+            loss.backward()
+            optimizer.step()
+            
+            # Calculate predictions and accuracy
+            _, preds = torch.max(outputs, dim=1)
+            batch_correct = (preds == target).sum().item()
+            batch_accuracy = batch_correct / data.size(0)
 
-def test_loop(epoch, dataloader, model, loss_fn, device='cuda'):
-    # Set the model to evaluation mode - important for batch normalization and dropout layers
-    # Unnecessary in this situation but added for best practices
+            # Update metrics
+            total_loss += loss.item()
+            correct += batch_correct
+
+            # Log per batch
+            wandb.log({
+                "Train Loss": loss.item(),
+                "Train Accuracy": batch_accuracy * 100
+            })
+
+            # Update progress bar
+            tepoch.set_postfix(loss=loss.item(), accuracy=100. * batch_accuracy)
+
+    avg_loss = total_loss / num_batches
+    avg_accuracy = (correct / size) * 100
+    print(f"Training -- Avg Loss: {avg_loss:.4f}, Avg Accuracy: {avg_accuracy:.2f}%")
+    return avg_loss, avg_accuracy
+
+def test_loop(epoch, dataloader, model, loss_fn, wandb, device='cuda'):
+    """
+    Evaluates the model on the test dataset and logs testing loss and accuracy.
+
+    Args:
+        epoch (int): Current epoch number.
+        dataloader (DataLoader): DataLoader for test data.
+        model (nn.Module): The neural network model.
+        loss_fn (nn.Module): Loss function.
+        wandb (wandb.sdk.wandb_run.Run): WandB run for logging.
+        device (str): Device to run the evaluation on.
+    
+    Returns:
+        float: Average testing loss over the epoch.
+        float: Testing accuracy over the epoch.
+    """
     model.eval()
     size = len(dataloader.dataset)
     num_batches = len(dataloader)
-    test_loss, correct = 0, 0
+    total_loss = 0.0
+    correct = 0
 
-    # Evaluating the model with torch.no_grad() ensures that no gradients are computed during test mode
-    # also serves to reduce unnecessary gradient computations and memory usage for tensors with requires_grad=True
     with torch.no_grad():
-         with tqdm(dataloader, unit="batch") as tepoch:
-          for data, target in tepoch:
-              tepoch.set_description(f"Epoch {epoch}")
-              data, target = data.to(device), target.to(device)
-              pred = model(data)
-              loss_val = loss_fn(pred, target).item()
-              correct_val = (pred.argmax(1) == target).type(torch.float).sum().item()
-              accuracy = correct_val/len(data)
-              test_loss += loss_val
-              correct += correct_val
-              tepoch.set_postfix(loss=loss_val, accuracy=100. * accuracy)
+        with tqdm(dataloader, desc=f"Epoch {epoch} [Test]", unit="batch") as tepoch:
+            for data, target in tepoch:
+                data, target = data.to(device), target.to(device)
+                outputs = model(data)
+                loss = loss_fn(outputs, target)
+                
+                # Calculate predictions and accuracy
+                _, preds = torch.max(outputs, dim=1)
+                batch_correct = (preds == target).sum().item()
+                batch_accuracy = batch_correct / data.size(0)
 
-    test_loss /= num_batches
-    correct /= size
-    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
-    return 100*correct
+                # Update metrics
+                total_loss += loss.item()
+                correct += batch_correct
+
+                # Update progress bar
+                tepoch.set_postfix(loss=loss.item(), accuracy=100. * batch_accuracy)
+
+    avg_loss = total_loss / num_batches
+    avg_accuracy = (correct / size) * 100
+    print(f"Testing -- Avg Loss: {avg_loss:.4f}, Avg Accuracy: {avg_accuracy:.2f}%")
+
+    # Log per epoch
+    wandb.log({
+        "Test Loss": avg_loss,
+        "Test Accuracy": avg_accuracy
+    }, step = epoch)
+
+    return avg_loss, avg_accuracy
 
 def checkpoint(model, filename):
+    """
+    Saves the model's state dictionary to a file.
+
+    Args:
+        model (nn.Module): The neural network model.
+        filename (str): Path to save the model.
+    """
     torch.save(model.state_dict(), filename)
-    
-def resume(model, filename):
-    model.load_state_dict(torch.load(filename))
+    print(f"Model checkpoint saved to {filename}")
+
+def resume(model, filename, device='cuda'):
+    """
+    Loads the model's state dictionary from a file.
+
+    Args:
+        model (nn.Module): The neural network model.
+        filename (str): Path to load the model from.
+        device (str): Device to map the model.
+    """
+    model.load_state_dict(torch.load(filename, map_location=device))
+    model.to(device)
+    print(f"Model loaded from {filename}")
 
 if __name__=="__main__":
     from torch.utils.data import Dataset
