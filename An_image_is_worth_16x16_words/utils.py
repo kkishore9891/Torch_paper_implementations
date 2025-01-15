@@ -89,7 +89,7 @@ def train_loop(epoch, dataloader, batch_size, model, loss_fn, optimizer, device=
          predictions = output.argmax(dim=1, keepdim=True).squeeze()
          loss = loss_fn(output, target)
          correct = (predictions == target).type(torch.float).sum().item()
-         accuracy = correct / batch_size
+         accuracy = correct / len(data)
 
          loss.backward()
          optimizer.step()
@@ -112,8 +112,12 @@ def test_loop(epoch, dataloader, model, loss_fn, device='cuda'):
               tepoch.set_description(f"Epoch {epoch}")
               data, target = data.to(device), target.to(device)
               pred = model(data)
-              test_loss += loss_fn(pred, target).item()
-              correct += (pred.argmax(1) == target).type(torch.float).sum().item()
+              loss_val = loss_fn(pred, target).item()
+              correct_val = (pred.argmax(1) == target).type(torch.float).sum().item()
+              accuracy = correct_val/len(data)
+              test_loss += loss_val
+              correct += correct_val
+              tepoch.set_postfix(loss=loss_val, accuracy=100. * accuracy)
 
     test_loss /= num_batches
     correct /= size
