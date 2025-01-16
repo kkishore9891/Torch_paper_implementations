@@ -1,11 +1,12 @@
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
+from torchvision.models import vision_transformer
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torchinfo import summary
 from vision_transformer_pytorch import VisionTransformer
-from utils import train_loop, test_loop, checkpoint
+from utils import train_loop, test_loop, checkpoint, resume
 import wandb
 import datetime
 
@@ -51,13 +52,15 @@ model = VisionTransformer(
     device=device
 ).to(device)
 
+resume(model=model, filename="models/cat_dog/cat_dog_image_net.pth")
+
 # Print model summary
 summary(model, input_size=(128, 3, 224, 224))
 
 # Hyperparameters
-learning_rate = 1e-4
-batch_size = 128
-epochs = 100
+learning_rate = 1e-5
+batch_size = 64
+epochs = 300
 
 # Datasets and Dataloaders
 train_dataset = ImageFolder(root="data/Cats_vs_Dogs/training_set", transform=train_transform)
@@ -75,10 +78,10 @@ best_test_accuracy = 0
 curr_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 wandb.init(
     project="ViT_b_32",
-    name=f"experiment_{curr_time}",
+    name=f"image_net_pretrain_experiment_{curr_time}",
     config={
         "learning_rate": learning_rate,
-        "architecture": "ViT_b_32",
+        "architecture": "ViT_b_32_imagenet",
         "dataset": "Cats_vs_Dogs",
         "epochs": epochs,
         "batch_size": batch_size,
@@ -86,6 +89,18 @@ wandb.init(
         "loss_function": "NLLLoss"
     }
 )
+
+# Define separate step metrics for training and testing
+wandb.define_metric("train_step")
+wandb.define_metric("Train Loss", step_metric="train_step")
+wandb.define_metric("Train Accuracy", step_metric="train_step")
+
+wandb.define_metric("epoch")
+wandb.define_metric("Test Loss", step_metric="epoch")
+wandb.define_metric("Test Accuracy", step_metric="epoch")
+
+# Initialize train_step counter
+train_step = 0
 
 # Log model architecture
 wandb.watch(model, log="all")
@@ -95,14 +110,15 @@ for epoch in range(1, epochs + 1):
     print(f"Epoch {epoch}/{epochs}\n{'-'*30}")
     
     # Training Phase
-    train_loss, train_accuracy = train_loop(
+    train_loss, train_accuracy, train_step = train_loop(
         epoch=epoch,
         dataloader=train_loader,
         model=model,
         loss_fn=loss_fn,
         optimizer=optimizer,
         wandb=wandb,
-        device=device
+        device=device,
+        train_step=train_step
     )
     
     # Testing Phase
@@ -119,7 +135,7 @@ for epoch in range(1, epochs + 1):
     if test_accuracy > best_test_accuracy:
         print(f"New best accuracy: {test_accuracy:.2f}% (previous: {best_test_accuracy:.2f}%)")
         best_test_accuracy = test_accuracy
-        checkpoint(model=model, filename="models/cat_dog/cat_dog_best.pth")
+        checkpoint(model=model, filename=f"models/cat_dog/cat_dog_{curr_time}_best.pth")
     
     print("\n")
 
