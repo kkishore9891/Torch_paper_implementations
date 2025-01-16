@@ -1,4 +1,5 @@
 import torchvision.transforms as transforms
+import torchvision.models as models
 from torchvision.datasets import ImageFolder
 from torchvision.models import vision_transformer
 import torch
@@ -38,21 +39,30 @@ test_transform = transforms.Compose([
 ])
 
 # Initialize the model
-model = VisionTransformer(
-    image_h=224,
-    image_w=224,
-    image_c=3,
-    patch_d=32,
-    dropout=0.2,
-    n_encoders=12,
-    n_heads=12,
-    embedding_dim=768,
-    ff_multiplier=4,
-    n_classes=2,
-    device=device
-).to(device)
+# model = VisionTransformer(
+#     image_h=224,
+#     image_w=224,
+#     image_c=3,
+#     patch_d=32,
+#     dropout=0.2,
+#     n_encoders=12,
+#     n_heads=12,
+#     embedding_dim=768,
+#     ff_multiplier=4,
+#     n_classes=2,
+#     device=device
+# ).to(device)
 
-resume(model=model, filename="models/cat_dog/cat_dog_image_net.pth")
+# resume(model=model, filename="models/cat_dog/cat_dog_image_net.pth")
+
+model = models.vit_b_32().to(device)
+model.dropout = 0.2
+
+# Get the number of input features of the last layer
+num_in_features = model.heads.head.in_features
+model.heads.head = nn.Sequential(nn.Linear(num_in_features, 2), nn.LogSoftmax(dim=-1))
+
+model = model.to(device=device)
 
 # Print model summary
 summary(model, input_size=(128, 3, 224, 224))
@@ -78,7 +88,7 @@ best_test_accuracy = 0
 curr_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 wandb.init(
     project="ViT_b_32",
-    name=f"image_net_pretrain_experiment_{curr_time}",
+    name=f"official_vit_scratch_experiment_{curr_time}",
     config={
         "learning_rate": learning_rate,
         "architecture": "ViT_b_32_imagenet",
