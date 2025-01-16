@@ -11,22 +11,10 @@ from tqdm import tqdm
 
 class PatchPositionEmbedding(nn.Module):
     """
-    This is an nn module that takes input token class numbers and converts them
-    to an embedding vector.
+    This nn module converts input images into embedded tokens with positional encodings
+    and includes a learnable class token.
     """
-    def __init__(self, image_h = 28, image_w = 28, image_c =3, patch_d=4, embedding_dim = 8, dropout = 0.1, device = 'cuda'):
-        """
-        Init function that initialises the embedding layer.
-
-        Arguments:
-            image_h (int): The height of the image.
-            image_w (int): The width of the image.
-            image_c (int): The number of channels in the image.
-            patch_d (int): The width and height of an image patch.
-            embedding_dim (int): The size of the embedded vector for each patch token.
-            dropout (int): Dropout probability
-            device (str): The device to which weights are loaded. Defaults to cuda.
-        """
+    def __init__(self, image_h=28, image_w=28, image_c=3, patch_d=4, embedding_dim=8, dropout=0.1, device='cuda'):
         super().__init__()
         self.image_h = image_h
         self.image_w = image_w
@@ -34,16 +22,21 @@ class PatchPositionEmbedding(nn.Module):
         self.patch_d = patch_d
         self.embedding_dim = embedding_dim
         self.device = device
-        
-        self.class_token = nn.parameter.Parameter(torch.randn(embedding_dim)).to(device=device)
-        
-        assert(image_h%patch_d==0), f"Image height {image_h} is not divisible by patch size {patch_d}"
-        assert(image_w%patch_d==0), f"Image width {image_w} is not divisible by patch size {patch_d}"
 
-        self.N_patches = (image_h*image_w)//patch_d**2
-        self.max_seq_len = self.N_patches+1
-        self.patch_embedding_layer = nn.Linear(self.patch_d**2*image_c, self.embedding_dim).to(device=device)
-        self.position_embedding = nn.Embedding(self.max_seq_len, embedding_dim).to(device=device)
+        # Define class_token as a learnable parameter with shape [1, 1, embedding_dim]
+        self.class_token = nn.Parameter(torch.randn(1, 1, embedding_dim))
+
+        assert image_h % patch_d == 0, f"Image height {image_h} is not divisible by patch size {patch_d}"
+        assert image_w % patch_d == 0, f"Image width {image_w} is not divisible by patch size {patch_d}"
+
+        self.N_patches = (image_h * image_w) // patch_d ** 2
+        self.max_seq_len = self.N_patches + 1  # +1 for class token
+
+        # Linear layer for patch embedding
+        self.patch_embedding_layer = nn.Linear(self.patch_d ** 2 * image_c, self.embedding_dim)
+
+        # Positional embeddings including class token
+        self.position_embedding = nn.Embedding(self.max_seq_len, embedding_dim)
 
         self.dropout = nn.Dropout(dropout)
         
@@ -71,14 +64,15 @@ class PatchPositionEmbedding(nn.Module):
                 patches[:,i*(self.image_w//self.patch_d)+j] = x[:,:,i*self.patch_d:(i+1)*self.patch_d,j*self.patch_d:(j+1)*self.patch_d].reshape(batch_size, self.patch_d**2*self.image_c)
 
         vector_patches = self.dropout(self.patch_embedding_layer(patches))
-        patch_embedding = torch.hstack([self.class_token.expand(batch_size,1,self.embedding_dim), vector_patches])
+        class_tokens = self.class_token.expand(batch_size, 1, self.embedding_dim)
+        patch_embedding = torch.hstack([class_tokens, vector_patches])
         patch_pos_embedding = patch_embedding + position_encodings
         patch_pos_embedding = self.dropout(patch_pos_embedding)
 
         return patch_pos_embedding
 
 
-def train_loop(epoch, dataloader, model, loss_fn, optimizer, wandb, device='cuda'):
+def train_loop(epoch, dataloader, model, loss_fn, optimizer, wandb, device='cuda', train_step=0):
     """
     Trains the model for one epoch and logs training loss and accuracy per batch.
 
@@ -90,6 +84,7 @@ def train_loop(epoch, dataloader, model, loss_fn, optimizer, wandb, device='cuda
         optimizer (torch.optim.Optimizer): Optimizer.
         wandb (wandb.sdk.wandb_run.Run): WandB run for logging.
         device (str): Device to run the training on.
+        train_step (int): Current training step count.
     
     Returns:
         float: Average training loss over the epoch.
@@ -119,10 +114,21 @@ def train_loop(epoch, dataloader, model, loss_fn, optimizer, wandb, device='cuda
             total_loss += loss.item()
             correct += batch_correct
 
+            # Log per batch with train_step
+            wandb.log({
+                "Train Loss": loss.item(),
+                "Train Accuracy": batch_accuracy * 100,
+                "train_step": train_step
+            })
+
+            # Increment train_step
+            train_step += 1
+
             # Log per batch
             wandb.log({
                 "Train Loss": loss.item(),
-                "Train Accuracy": batch_accuracy * 100
+                "Train Accuracy": batch_accuracy * 100,
+                "train_step": train_step
             })
 
             # Update progress bar
@@ -131,7 +137,7 @@ def train_loop(epoch, dataloader, model, loss_fn, optimizer, wandb, device='cuda
     avg_loss = total_loss / num_batches
     avg_accuracy = (correct / size) * 100
     print(f"Training -- Avg Loss: {avg_loss:.4f}, Avg Accuracy: {avg_accuracy:.2f}%")
-    return avg_loss, avg_accuracy
+    return avg_loss, avg_accuracy, train_step
 
 def test_loop(epoch, dataloader, model, loss_fn, wandb, device='cuda'):
     """
@@ -178,11 +184,12 @@ def test_loop(epoch, dataloader, model, loss_fn, wandb, device='cuda'):
     avg_accuracy = (correct / size) * 100
     print(f"Testing -- Avg Loss: {avg_loss:.4f}, Avg Accuracy: {avg_accuracy:.2f}%")
 
-    # Log per epoch
+    # Log per epoch with epoch as the step
     wandb.log({
         "Test Loss": avg_loss,
-        "Test Accuracy": avg_accuracy
-    }, step = epoch)
+        "Test Accuracy": avg_accuracy,
+        "epoch": epoch  # Use 'epoch' as the step for testing metrics
+    })
 
     return avg_loss, avg_accuracy
 
