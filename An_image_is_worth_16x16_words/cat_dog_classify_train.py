@@ -39,28 +39,21 @@ test_transform = transforms.Compose([
 ])
 
 # Initialize the model
-# model = VisionTransformer(
-#     image_h=224,
-#     image_w=224,
-#     image_c=3,
-#     patch_d=32,
-#     dropout=0.2,
-#     n_encoders=12,
-#     n_heads=12,
-#     embedding_dim=768,
-#     ff_multiplier=4,
-#     n_classes=2,
-#     device=device
-# ).to(device)
+model = VisionTransformer(
+    image_h=224,
+    image_w=224,
+    image_c=3,
+    patch_d=32,
+    dropout=0.2,
+    n_encoders=12,
+    n_heads=12,
+    embedding_dim=768,
+    ff_multiplier=4,
+    n_classes=2,
+    device=device
+).to(device)
 
-# resume(model=model, filename="models/cat_dog/cat_dog_image_net.pth")
-
-model = models.vit_b_32().to(device)
-model.dropout = 0.2
-
-# Get the number of input features of the last layer
-num_in_features = model.heads.head.in_features
-model.heads.head = nn.Sequential(nn.Linear(num_in_features, 2), nn.LogSoftmax(dim=-1))
+resume(model=model, filename="models/cat_dog/cat_dog_image_net.pth")
 
 model = model.to(device=device)
 

@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math as m
 from tqdm import tqdm
+from matplotlib import pyplot as plt
 
 
 class PatchPositionEmbedding(nn.Module):
@@ -192,6 +193,56 @@ def test_loop(epoch, dataloader, model, loss_fn, wandb, device='cuda'):
     })
 
     return avg_loss, avg_accuracy
+
+def infer_and_visualize(dataloader, model, class_names, device='cuda'):
+    """
+    Evaluates the model on the test dataset and visualizes the results.
+
+    Args:
+        dataloader (DataLoader): DataLoader for test data.
+        model (nn.Module): The neural network model.
+        class_names (list): List of class names corresponding to class indices.
+        device (str): Device to run the evaluation on.
+    """
+    model.eval()
+
+    with torch.no_grad():
+        for data, target in dataloader:
+            assert len(data) <= 20, "Batch size should not be more than 20 for evaluation"
+            
+            # Convert images to numpy for visualization
+            images = torch.permute(data, (0, 2, 3, 1)).numpy()
+            data, target = data.to(device), target.to(device)
+            outputs = model(data)
+            
+            # Get predictions (assuming model outputs logits)
+            _, preds = torch.max(outputs, 1)
+            
+            # Visualize the images and annotations
+            batch_size = len(images)
+            rows, cols = 4, 5  # Define grid size (max 20 images)
+            fig, axes = plt.subplots(rows, cols, figsize=(15, 12))
+            fig.suptitle("Predictions vs Ground Truth", fontsize=16)
+            
+            for i in range(rows * cols):
+                ax = axes[i // cols, i % cols]  # Subplot grid
+                if i < batch_size:
+                    # Show image
+                    ax.imshow(images[i])
+                    ax.axis("off")
+                    # Add title with prediction and ground truth
+                    pred_class = class_names[preds[i].item()]
+                    true_class = class_names[target[i].item()]
+                    ax.set_title(f"P: {pred_class}\nGT: {true_class}", fontsize=10)
+                else:
+                    # Hide axes for unused subplots
+                    ax.axis("off")
+            
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()
+            plt.savefig(f"Cat_vs_Dogs_result.png")
+            break  # Visualize one batch only
+                
 
 def checkpoint(model, filename):
     """

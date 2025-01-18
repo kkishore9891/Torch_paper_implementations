@@ -25,7 +25,7 @@ class InputEmbedding(nn.Module):
         self.vocab_len = vocab_len
         self.embedding_dim = embedding_dim
         self.embedding_layer = nn.Embedding(num_embeddings=self.vocab_len,
-                                             embedding_dim=embedding_dim).to(device=device)
+                                             embedding_dim=embedding_dim)
 
     def forward(self, x):
         """
