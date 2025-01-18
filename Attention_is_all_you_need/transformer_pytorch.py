@@ -74,7 +74,7 @@ class MultiHeadAttention(nn.Module):
             mask = mask.bool()
             self. dot_prod = self.dot_prod.masked_fill(mask, value=-1*torch.inf)
 
-        self.dot_prod = self.softmax(self.dot_prod)
+        self.dot_prod = self.softmax(self.dot_prod/(self.d_k**(1/2)))
 
         # self.attention = torch.einsum("bhqv,bvhd->bqhd", self.dot_prod, self.value).reshape(self.batch_size,self.query_len, self.d_model)
         self.attention = torch.matmul(self.dot_prod, torch.permute(self.value, (0,2,1,3))) 
