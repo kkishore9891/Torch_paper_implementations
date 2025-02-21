@@ -5,7 +5,7 @@ This module contains utility functions required for creating the transformer mod
 import math as m
 import torch
 import torch.nn as nn
-
+from torch.utils.data import Dataset
 
 class InputEmbedding(nn.Module):
     """
@@ -55,6 +55,64 @@ def PositionalEncoding(max_seq_len: int = 1000, embedding_dim: int = 768, device
             pos_embeddings[pos, 2 * i] = m.sin(pos / (5 ** (2 * i / embedding_dim)))
             pos_embeddings[pos, 2 * i + 1] = m.cos(pos / (5 ** (2 * i / embedding_dim)))
     return pos_embeddings.to(device=device)
+
+
+class Tokenization(Dataset):
+    """
+    This class is responsible for tokenizing a large chunk of text into
+    tokens by assigning an index to every character present in the text.
+    Every unique character in the text is assigned an index and the
+    resulting dictionary in turn will be used to convert the characters
+    to token indices. One hot encoding is not performed here.
+    """
+    def __init__(self, text):
+        """
+        Function that initialises the Tokenisation class by processing
+        the text to calculate the tokenisation parameters
+
+        Args:
+            text (str): Raw string that will be tokenised for training.
+        """
+        unique_chars = sorted(set(text))
+        total_tokens, vocab_len = len(text), len(unique_chars)
+
+        print(f"The current dataset consists of {total_tokens} tokens
+               and {vocab_len} unique symbols that can be fed to and
+               predicted by the LLM.")
+        
+        self.char_encode_dict = {unique_char:idx for idx,unique_char in enumerate(unique_chars)}
+        self.token_decode_dict = {idx:unique_char for idx,unique_char in enumerate(unique_chars)}
+
+        self.context_len = 1000
+        self.vocab_len = vocab_len
+        self.text_dataset = text
+        self.total_tokens = total_tokens
+    
+    def __len__(self):
+        """
+        Returns the total number of starting tokens from which
+        context blocks can be sampled from.
+        """
+        return self.total_tokens - self.context_len
+    
+    def __getitem__(self, idx):
+        """
+        Returns the tokenized characters of context length 'block size'
+        from the text dataset's index idx.
+        """
+        text_block = self.text_dataset[idx:idx+self.context_len+1]
+        tokenized_block = [self.char_encode_dict[char] for char in text_block]
+
+        x = torch.tensor(tokenized_block[:self.context_len], dtype = torch.long)
+        y = torch.tensor(tokenized_block[1:], dtype = torch.long)
+
+        return x, y
+
+
+
+    
+
+
 
 
 if __name__ == "__main__":

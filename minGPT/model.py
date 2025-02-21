@@ -197,7 +197,7 @@ class GPT(nn.Module):
         self.norm = nn.LayerNorm(embedding_dim)
         self.prediction_layer = nn.Linear(embedding_dim, targ_vocab_len)
         self.softmax = nn.Softmax(dim=-1)
-        self.block_size = max_seq_len
+        self.context_len = max_seq_len
 
     @torch.no_grad()
     def generate(self, x: torch.Tensor, max_new_tokens: int, temperature: float = 1.0,
@@ -219,8 +219,8 @@ class GPT(nn.Module):
         # Inspired from: https://github.com/karpathy/minGPT/blob/master/mingpt/model.py
         for _ in range(max_new_tokens):
             # Ensure sequence stays within block size.
-            if x.size(1) > self.block_size:
-                x = x[:, -self.block_size:]
+            if x.size(1) > self.context_len:
+                x = x[:, -self.context_len:]
 
             logits = self(x)
             # Scale the logits for the last token.
@@ -253,7 +253,7 @@ class GPT(nn.Module):
             Tensor: Logits of shape (batch_size, seq_len, targ_vocab_len).
         """
         batch_size, seq_len = decoder_input_batch.size()
-        if seq_len > self.block_size:
+        if seq_len > self.context_len:
             raise ValueError("Input exceeds context length!")
         decoder_output = self.decoder_stack(decoder_input_batch, target_mask)
         logits = self.prediction_layer(self.norm(decoder_output))
