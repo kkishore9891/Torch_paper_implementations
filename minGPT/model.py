@@ -112,13 +112,16 @@ class DecoderBlock(nn.Module):
             Tensor: Output tensor of shape (batch_size, seq_len, embedding_dim).
         """
         # Self-attention with residual connection.
-        attn = self.mhsa(self.norm1(x), self.norm1(x), self.norm1(x), mask)
+        normed_x1 = self.norm1(x)
+        attn = self.mhsa(normed_x1, normed_x1, normed_x1, mask)
         x = x + attn
 
-        # Feed-forward network with residual connection.
-        ff = self.dropout(self.feed_forward(self.norm2(x)))
+        # Single use of norm2
+        normed_x2 = self.norm2(x)
+        ff = self.dropout(self.feed_forward(normed_x2))
         x = x + ff
         return x
+
 
 
 class DecoderStack(nn.Module):
@@ -170,13 +173,12 @@ class DecoderStack(nn.Module):
 
 class GPT(nn.Module):
     """Transformer-based language model using a stacked decoder architecture."""
-    def __init__(self, src_vocab_len: int = 10, targ_vocab_len: int = 10,
-                 max_seq_len: int = 5, dropout: float = 0.1, n_decoders: int = 6,
-                 n_heads: int = 5, embedding_dim: int = 10, ff_multiplier: int = 4):
+    def __init__(self, src_vocab_len: int = 10, max_seq_len: int = 5,
+                 dropout: float = 0.1, n_decoders: int = 6, n_heads: int = 5,
+                 embedding_dim: int = 10, ff_multiplier: int = 4):
         """
         Args:
             src_vocab_len: Vocabulary length of the source data.
-            targ_vocab_len: Vocabulary length of the target data.
             max_seq_len: Maximum sequence length.
             dropout: Dropout probability.
             n_decoders: Number of decoder blocks to stack.
@@ -195,7 +197,7 @@ class GPT(nn.Module):
             dropout=dropout
         )
         self.norm = nn.LayerNorm(embedding_dim)
-        self.prediction_layer = nn.Linear(embedding_dim, targ_vocab_len)
+        self.prediction_layer = nn.Linear(embedding_dim, src_vocab_len)
         self.softmax = nn.Softmax(dim=-1)
         self.context_len = max_seq_len
 
@@ -250,7 +252,7 @@ class GPT(nn.Module):
             target_mask: Optional mask for attention layers.
 
         Returns:
-            Tensor: Logits of shape (batch_size, seq_len, targ_vocab_len).
+            Tensor: Logits of shape (batch_size, seq_len, src_vocab_len).
         """
         batch_size, seq_len = decoder_input_batch.size()
         if seq_len > self.context_len:
@@ -264,7 +266,6 @@ if __name__ == "__main__":
     # Configuration.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     src_vocab_len = 10
-    targ_vocab_len = 10
     max_seq_len = 1000
     dropout = 0.1
     n_decoders = 12
@@ -285,7 +286,6 @@ if __name__ == "__main__":
     # Instantiate the model and move it to the device.
     gpt = GPT(
         src_vocab_len=src_vocab_len,
-        targ_vocab_len=targ_vocab_len,
         max_seq_len=max_seq_len,
         dropout=dropout,
         n_decoders=n_decoders,
