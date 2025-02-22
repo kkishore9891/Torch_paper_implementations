@@ -108,7 +108,7 @@ def train_loop(
             })
 
             # Occasionally generate sample
-            if train_step % 200 == 0:
+            if train_step % generate_every == 0:
                 input_ids = dataloader.dataset.encode_text("Et tu, Brute!")
                 input_tensor = torch.tensor(input_ids, dtype=torch.long)[None].to(device)
                 prediction = model.generate(input_tensor, max_new_tokens=100)
@@ -122,7 +122,7 @@ def train_loop(
 
     # Log epoch-level metrics
     # Perplexity = exp(cross_entropy)
-    avg_perplexity = math.exp(avg_loss)
+    avg_perplexity = m.exp(avg_loss)
 
     print(f"Training -- Avg Loss: {avg_loss:.4f}, Avg Accuracy: {avg_accuracy:.2f}%, "
           f"Avg Perplexity: {avg_perplexity:.2f}")
