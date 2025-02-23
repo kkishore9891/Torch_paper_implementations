@@ -75,6 +75,7 @@ def train_loop(
     num_batches = len(dataloader)
     total_loss = 0.0
     correct = 0
+    total_samples = 0
 
     with tqdm(dataloader, desc=f"Epoch {epoch} [Train]", unit="batch") as tepoch:
         for batch_idx, (data, target) in enumerate(tepoch, start=1):
@@ -96,6 +97,7 @@ def train_loop(
             # Update aggregated metrics
             total_loss += loss.item()
             correct += batch_correct
+            total_samples += target.numel()
 
             # Increment step
             train_step += 1
@@ -109,7 +111,8 @@ def train_loop(
 
             # Occasionally generate sample
             if train_step % generate_every == 0:
-                input_ids = dataloader.dataset.encode_text("Et tu, Brute!")
+                # input_ids = dataloader.dataset.encode_text("Et tu, Brute!")
+                input_ids = dataloader.dataset.encode_text("\"ACT I\"")
                 input_tensor = torch.tensor(input_ids, dtype=torch.long)[None].to(device)
                 prediction = model.generate(input_tensor, max_new_tokens=100)
                 print(dataloader.dataset.decode_tokens(prediction[0].cpu().tolist()))
@@ -118,7 +121,7 @@ def train_loop(
 
     # Compute average loss/accuracy over the epoch
     avg_loss = total_loss / num_batches
-    avg_accuracy = (correct / size) * 100
+    avg_accuracy = (correct / total_samples) * 100
 
     # Log epoch-level metrics
     # Perplexity = exp(cross_entropy)

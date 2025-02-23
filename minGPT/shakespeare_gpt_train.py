@@ -21,7 +21,7 @@ model = GPT(src_vocab_len=vocab_len, max_seq_len=context_len,
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-resume(model=model, filename="models/shakespeare/shakespeare_best.pth")
+resume(model=model, filename="models/shakespeare/shakespeare_20250223-073827_best.pth")
 
 model = model.to(device=device)
 
@@ -57,11 +57,14 @@ wandb.init(
 wandb.define_metric("train_step")
 wandb.define_metric("Train Loss", step_metric="train_step")
 wandb.define_metric("Train Accuracy", step_metric="train_step")
+wandb.define_metric("Train Accuracy", step_metric="train_step")
 
 wandb.define_metric("epoch")
 wandb.define_metric("Test Loss", step_metric="epoch")
 wandb.define_metric("Test Accuracy", step_metric="epoch")
-
+wandb.define_metric("Train Perplexity", step_metric="epoch")
+wandb.define_metric("Avg Train Loss", step_metric="epoch")
+wandb.define_metric("Avg Train Accuracy", step_metric="epoch")
 # Initialize train_step counter
 train_step = 0
 
@@ -87,7 +90,8 @@ for epoch in range(1, epochs + 1):
         optimizer=optimizer,
         wandb=wandb,
         device=device,
-        train_step=train_step
+        train_step=train_step,
+        generate_every=100
     )
     
     # Checkpointing
