@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 import os
+import tiktoken
 
 class InputEmbedding(nn.Module):
     """
@@ -112,7 +113,7 @@ def train_loop(
             # Occasionally generate sample
             if train_step % generate_every == 0:
                 # input_ids = dataloader.dataset.encode_text("Et tu, Brute!")
-                input_ids = dataloader.dataset.encode_text("\"ACT I\"")
+                input_ids = dataloader.dataset.encode_text("ACT I \nSCENE I. London. The palace.")
                 input_tensor = torch.tensor(input_ids, dtype=torch.long)[None].to(device)
                 prediction = model.generate(input_tensor, max_new_tokens=100)
                 print(dataloader.dataset.decode_tokens(prediction[0].cpu().tolist()))
@@ -167,7 +168,7 @@ def resume(model, filename, device='cuda'):
     else:
         print(f"{filename} not available.")
 
-class Tokenization(Dataset):
+class CharTokenization(Dataset):
     """
     This class is responsible for tokenizing a large chunk of text into
     tokens by assigning an index to every character present in the text.
@@ -226,6 +227,64 @@ class Tokenization(Dataset):
         y = torch.tensor(tokenized_block[1:], dtype = torch.long)
 
         return x, y
+    
+class GPTTokenization(Dataset):
+    """
+    This class is responsible for tokenizing a large chunk of text into
+    tokens by assigning an index to every character present in the text.
+    Every unique character in the text is assigned an index and the
+    resulting dictionary in turn will be used to convert the characters
+    to token indices. One hot encoding is not performed here.
+    """
+    def __init__(self, text, context_len = 100):
+        """
+        Function that initialises the Tokenisation class by processing
+        the text to calculate the tokenisation parameters
+
+        Args:
+            text (str): Raw string that will be tokenised for training.
+        """
+        self.tokenizer = tiktoken.get_encoding("gpt2")
+        encoded_text = self.encode_text(text)
+        total_tokens, vocab_len = len(encoded_text), self.tokenizer.n_vocab
+
+        print(f"The current dataset consists of {total_tokens} tokens and {vocab_len} unique symbols that can be fed to and predicted by the LLM.")
+
+
+        self.context_len = context_len
+        self.vocab_len = vocab_len
+        self.encoded_text_dataset = encoded_text
+        self.total_tokens = total_tokens
+
+    def encode_text(self, text_block):
+        tokenized_block = self.tokenizer.encode(text_block)
+
+        return tokenized_block
+    
+    def decode_tokens(self, tokenized_block):
+        text_block = self.tokenizer.decode(tokenized_block)
+        return text_block
+
+    
+    def __len__(self):
+        """
+        Returns the total number of starting tokens from which
+        context blocks can be sampled from.
+        """
+        return self.total_tokens - self.context_len
+    
+    def __getitem__(self, idx):
+        """
+        Returns the tokenized characters of context length 'block size'
+        from the text dataset's index idx.
+        """
+        tokenized_block = self.encoded_text_dataset[idx:idx+self.context_len+1]
+
+        x = torch.tensor(tokenized_block[:self.context_len], dtype = torch.long)
+        y = torch.tensor(tokenized_block[1:], dtype = torch.long)
+
+        return x, y
+
 
 if __name__ == "__main__":
     input_embedding = InputEmbedding(vocab_len=10, embedding_dim=10)

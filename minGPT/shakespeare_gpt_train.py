@@ -5,31 +5,31 @@ from torchinfo import summary
 import wandb
 import datetime
 from model import GPT
-from utils import Tokenization
+from utils import CharTokenization, GPTTokenization
 from utils import train_loop, checkpoint, resume
 import wandb
 import datetime
 
-input_text = open('shakespeare.txt', 'r').read()
-context_len = 128
+input_text = open('shakespeare.txt', 'r').read()[:30000]
+context_len = 2000
 
-train_dataset = Tokenization(input_text, context_len=context_len)
+train_dataset = GPTTokenization(input_text, context_len=context_len)
 vocab_len = train_dataset.vocab_len
 model = GPT(src_vocab_len=vocab_len, max_seq_len=context_len,
-            dropout=0.1, n_decoders=12, n_heads=12,
-            embedding_dim=768, ff_multiplier=4)
+            dropout=0.1, n_decoders=6, n_heads=6,
+            embedding_dim=192, ff_multiplier=4)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-resume(model=model, filename="models/shakespeare/shakespeare_20250223-073827_best.pth")
+# resume(model=model, filename="models/shakespeare/shakespeare_20250223-073827_best.pth")
 
 model = model.to(device=device)
 
 summary(model)
 
 # Hyperparameters
-learning_rate = 1e-4
-batch_size = 100
+learning_rate = 5e-4
+batch_size = 3
 epochs = 30
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
@@ -91,7 +91,7 @@ for epoch in range(1, epochs + 1):
         wandb=wandb,
         device=device,
         train_step=train_step,
-        generate_every=100
+        generate_every=1000
     )
     
     # Checkpointing
